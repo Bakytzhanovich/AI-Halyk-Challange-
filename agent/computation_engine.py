@@ -182,6 +182,44 @@ def calc_marketing_expenses(
     return abs(sum(t.amount for t in matched)), warnings
 
 
+def calc_total_permitted_debt_limit(
+    transactions: list[TransactionRecord], base_currency: str = "USD"
+) -> tuple[float, list[str]]:
+    active = _active(transactions)
+    active, warnings = _split_by_currency(active, base_currency)
+    return _sum_category(active, "financing"), warnings
+
+
+_CONSULTING_DESCRIPTION_RE = re.compile(
+    r"consulting|advisory|professional services", re.I
+)
+
+
+def calc_consulting_services_to_ebitda_ratio(
+    transactions: list[TransactionRecord], base_currency: str = "USD"
+) -> tuple[float, list[str]]:
+    """
+    Как calc_marketing_expenses — сканирует description напрямую, в обход
+    общей категоризации: "advisory"/"consulting" встречаются повсеместно
+    как шумовые транзакции ("Management advisory retainer") даже у
+    компаний без такого ковенанта. Вызывается только когда извлечённая
+    формула компании — про consulting/ebitda, поэтому безопасно.
+    """
+    active = _active(transactions)
+    active, warnings = _split_by_currency(active, base_currency)
+    matched = [t for t in active if _CONSULTING_DESCRIPTION_RE.search(t.description)]
+    consulting = abs(sum(t.amount for t in matched))
+    ebitda, _ = _calc_ebitda(active)
+    if ebitda == 0:
+        raise ValueError("EBITDA = 0, деление на ноль")
+    warnings = warnings + [
+        "consulting_services_to_ebitda_ratio: консультационные услуги "
+        "считаются по факту транзакций, текст которых матчит "
+        "consulting/advisory/professional services ключевые слова"
+    ]
+    return consulting / ebitda, warnings
+
+
 def calc_debt_to_ebitda_ratio(
     transactions: list[TransactionRecord], base_currency: str = "USD"
 ) -> tuple[float, list[str]]:
@@ -346,6 +384,8 @@ _DISPATCH = {
     ("fixed", "cost", "coverage", "reserve"): calc_fixed_cost_coverage_reserve,
     ("fixed", "charge", "coverage"): calc_minimum_fixed_charge_coverage_ratio,
     ("retained", "financing"): calc_minimum_retained_financing_proceeds,
+    ("permitted", "debt"): calc_total_permitted_debt_limit,
+    ("consulting", "ebitda"): calc_consulting_services_to_ebitda_ratio,
 }
 
 
