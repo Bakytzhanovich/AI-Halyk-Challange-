@@ -39,7 +39,13 @@ def score_submission(
     ground_truth = json.loads(ground_truth_path.read_text(encoding="utf-8"))
 
     sub_answers = submission.get("answers", {})
-    gt_answers = ground_truth.get("answers", ground_truth)  # на случай разной обёртки
+    gt_answers = ground_truth.get("answers")
+    if gt_answers is None:
+        # ground_truth.json хранит условия как scenarios[company_id]["covenants"]
+        scenarios = ground_truth.get("scenarios", {})
+        gt_answers = {
+            company_id: data.get("covenants", {}) for company_id, data in scenarios.items()
+        }
 
     total_score = 0.0
     max_score = 0.0

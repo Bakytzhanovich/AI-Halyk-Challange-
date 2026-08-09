@@ -58,7 +58,8 @@ class TransactionRecord(BaseModel):
     category: Optional[
         Literal[
             "capex", "opex", "rent", "revenue",
-            "financing_or_tax", "related_party", "other",
+            "interest", "tax", "payroll", "utilities", "insurance",
+            "related_party", "other",
         ]
     ] = None
     excluded_by_audit: bool = False

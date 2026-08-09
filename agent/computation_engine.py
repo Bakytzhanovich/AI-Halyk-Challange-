@@ -3,9 +3,13 @@ computation_engine — считает actual-значение метрики п�
 транзакциям. Чистый Python, детерминированно, без LLM.
 
 Диспетчеризация по metric_name (из term_extractor) через ключевые слова —
-не жёсткий whitelist, потому что у других 11 компаний могут быть другие
-метрики/формулировки, которых мы ещё не видели. Если метрика не распознана —
-функция явно возвращает None и просит ручной разбор, а не молча врёт нулём.
+term_extractor генерирует metric_name ЗАНОВО на каждый прогон (LLM
+недетерминирован), одна и та же формула может называться по-разному
+между прогонами. Ключевые слова там, где возможны коллизии между
+разными формулами — сделаны специфичными; там, где в рамках этого
+датасета концепт однозначен (например "insurance" — единственный
+insurance-ковенант во всех 36 условиях) — используется одно слово
+для устойчивости к переименованиям.
 """
 from __future__ import annotations
 
@@ -14,45 +18,192 @@ from kyc_linker import is_related_party
 
 
 def _active(transactions: list[TransactionRecord]) -> list[TransactionRecord]:
-    """Транзакции, не исключённые audit_adjuster."""
     return [t for t in transactions if not t.excluded_by_audit]
 
 
-def calc_capital_intensity_ratio(transactions: list[TransactionRecord]) -> float:
+def _split_by_currency(
+    transactions: list[TransactionRecord], base_currency: str
+) -> tuple[list[TransactionRecord], list[str]]:
+    matching = [t for t in transactions if t.currency == base_currency]
+    foreign = [t for t in transactions if t.currency != base_currency]
+    warnings = [
+        f"Транзакция {t.txn_id} в {t.currency} ({t.amount:,.2f}) исключена из "
+        f"расчёта — базовая валюта {base_currency}, конвертация не выполняется "
+        f"(нет фиксированного курса в договоре)"
+        for t in foreign
+    ]
+    return matching, warnings
+
+
+def _sum_category(transactions: list[TransactionRecord], category: str) -> float:
+    return abs(sum(t.amount for t in transactions if t.category == category))
+
+
+def _net_operating_expenses(active: list[TransactionRecord]) -> float:
+    return sum(
+        t.amount for t in active
+        if t.category in ("opex", "payroll", "utilities", "insurance")
+    )
+
+
+def _calc_ebitda(active: list[TransactionRecord]) -> tuple[float, float]:
+    revenue = sum(t.amount for t in active if t.category == "revenue")
+    operating_costs = abs(_net_operating_expenses(active)) + _sum_category(active, "rent")
+    return revenue - operating_costs, revenue
+
+
+def calc_capital_intensity_ratio(
+    transactions: list[TransactionRecord], base_currency: str = "USD"
+) -> tuple[float, list[str]]:
     active = _active(transactions)
-    # ВАЖНО: сначала суммируем со знаком (расходы и возвраты/кредиты
-    # взаимозачитываются), и только потом берём abs() от ИТОГА.
-    # abs() каждой транзакции по отдельности завышает сумму, если
-    # в категории есть и дебеты, и кредиты (см. баг, пойманный тестом).
-    capex = abs(sum(t.amount for t in active if t.category == "capex"))
-    opex = abs(sum(t.amount for t in active if t.category == "opex"))
-    rent = abs(sum(t.amount for t in active if t.category == "rent"))
+    active, warnings = _split_by_currency(active, base_currency)
+    capex = _sum_category(active, "capex")
+    opex = abs(_net_operating_expenses(active))
+    rent = _sum_category(active, "rent")
     denominator = opex + rent
     if denominator == 0:
-        raise ValueError("OpEx + Rent = 0, деление на ноль — проверь классификацию")
-    return capex / denominator
+        raise ValueError("OpEx + Rent = 0, деление на ноль")
+    return capex / denominator, warnings
 
 
-def calc_revenue(transactions: list[TransactionRecord]) -> float:
+def calc_revenue(
+    transactions: list[TransactionRecord], base_currency: str = "USD"
+) -> tuple[float, list[str]]:
     active = _active(transactions)
-    return sum(t.amount for t in active if t.category == "revenue")
+    active, warnings = _split_by_currency(active, base_currency)
+    return sum(t.amount for t in active if t.category == "revenue"), warnings
 
 
 def calc_related_party_payments(
-    transactions: list[TransactionRecord], related_party_names: list[str]
-) -> float:
+    transactions: list[TransactionRecord],
+    related_party_names: list[str],
+    base_currency: str = "USD",
+) -> tuple[float, list[str]]:
     active = _active(transactions)
+    active, warnings = _split_by_currency(active, base_currency)
     matched = [t for t in active if is_related_party(t.counterparty, related_party_names)]
-    # Тот же принцип: сначала netting со знаком, потом abs от итога —
-    # если у связанной стороны есть и платежи, и возвраты, они должны
-    # взаимозачитываться, а не складываться по модулю.
-    return abs(sum(t.amount for t in matched))
+    return abs(sum(t.amount for t in matched)), warnings
 
 
-# Диспетчер: ключевые слова в metric_name (нижний регистр) -> функция расчёта.
-# Функции related_party требуют доп. аргумент related_party_names — обрабатываются отдельно.
+def calc_adjusted_ebitda_margin(
+    transactions: list[TransactionRecord], base_currency: str = "USD"
+) -> tuple[float, list[str]]:
+    active = _active(transactions)
+    active, warnings = _split_by_currency(active, base_currency)
+    ebitda, revenue = _calc_ebitda(active)
+    if revenue == 0:
+        raise ValueError("Revenue = 0, деление на ноль")
+    warnings = warnings + [
+        "adjusted_ebitda_margin: считается БЕЗ учёта разовых статей от "
+        "аудитора (обратное добавление к EBITDA) — не хватает источника "
+        "данных, результат приблизительный"
+    ]
+    return ebitda / revenue, warnings
+
+
+def calc_interest_coverage_ratio(
+    transactions: list[TransactionRecord], base_currency: str = "USD"
+) -> tuple[float, list[str]]:
+    active = _active(transactions)
+    active, warnings = _split_by_currency(active, base_currency)
+    ebitda, _ = _calc_ebitda(active)
+    interest = _sum_category(active, "interest")
+    if interest == 0:
+        raise ValueError("Interest expense = 0, деление на ноль")
+    return ebitda / interest, warnings
+
+
+def calc_individual_overhead_line_ceiling(
+    transactions: list[TransactionRecord], base_currency: str = "USD"
+) -> tuple[float, list[str]]:
+    active = _active(transactions)
+    active, warnings = _split_by_currency(active, base_currency)
+    payroll = _sum_category(active, "payroll")
+    utilities = _sum_category(active, "utilities")
+    return max(payroll, utilities), warnings
+
+
+def calc_insurance_premium_to_expense_ratio(
+    transactions: list[TransactionRecord], base_currency: str = "USD"
+) -> tuple[float, list[str]]:
+    active = _active(transactions)
+    active, warnings = _split_by_currency(active, base_currency)
+    insurance = _sum_category(active, "insurance")
+    denominator = _sum_category(active, "rent") + _sum_category(active, "utilities")
+    if denominator == 0:
+        raise ValueError("Rent + Utilities = 0, деление на ноль")
+    return insurance / denominator, warnings
+
+
+def calc_capital_expenditure(
+    transactions: list[TransactionRecord], base_currency: str = "USD"
+) -> tuple[float, list[str]]:
+    active = _active(transactions)
+    active, warnings = _split_by_currency(active, base_currency)
+    warnings = warnings + [
+        "capital_expenditure: считается по факту транзакций категории capex, "
+        "БЕЗ учёта переклассификаций аудитором в/из этой статьи"
+    ]
+    return _sum_category(active, "capex"), warnings
+
+
+def calc_minimum_cover_ratio(
+    transactions: list[TransactionRecord], base_currency: str = "USD"
+) -> tuple[float, list[str]]:
+    active = _active(transactions)
+    active, warnings = _split_by_currency(active, base_currency)
+    revenue = sum(t.amount for t in active if t.category == "revenue")
+    denominator = _sum_category(active, "capex") + abs(_net_operating_expenses(active))
+    if denominator == 0:
+        raise ValueError("OpEx + CapEx = 0, деление на ноль")
+    warnings = warnings + [
+        "minimum_cover_ratio: считается БЕЗ учёта 'поступлений по "
+        "финансированию' — категории для них нет, результат может быть "
+        "занижен относительно точного значения"
+    ]
+    return revenue / denominator, warnings
+
+
+_KNOWN_UNSUPPORTED_KEYWORDS: list[tuple[list[tuple[str, ...]], str]] = [
+    (
+        [("personnel",), ("персонал", "пособ")],
+        "формула требует данные о программе выходных пособий/сокращения "
+        "персонала 'как раскрыто в примечаниях к отчётности' — источник "
+        "не парсится текущим audit_adjuster",
+    ),
+    (
+        [("tax", "utility"), ("налог", "казначейств")],
+        "формула требует 'начисленные, но не уплаченные налоги, "
+        "подтверждённые учётными данными казначейства' — такого источника "
+        "данных нет ни в леджере, ни в документах",
+    ),
+    (
+        [("capital", "expenditure", "ebitda"), ("консолидированн", "групп")],
+        "формула считает капитальные затраты ГРУППЫ по консолидированной "
+        "отчётности материнской компании — у нас есть только транзакции "
+        "самого Заёмщика, консолидированных данных группы нет",
+    ),
+    (
+        [("financing", "ebitda"), ("leverage",), ("поступлен", "финансир", "ebitda")],
+        "формула требует 'поступления по финансированию' с конвертацией "
+        "по курсу, раскрытому аудитором — ни категории, ни курса у нас нет",
+    ),
+    (
+        [("asset", "transfer"), ("дочерн", "неограничен")],
+        "формула требует список 'Неограниченных дочерних организаций' из "
+        "KYC-досье и транзакции передачи активов дочерним структурам",
+    ),
+]
+
+
 _DISPATCH = {
     ("capital", "intensity"): calc_capital_intensity_ratio,
+    ("capital", "expenditure"): calc_capital_expenditure,
+    ("ebitda", "margin"): calc_adjusted_ebitda_margin,
+    ("interest", "coverage"): calc_interest_coverage_ratio,
+    ("overhead",): calc_individual_overhead_line_ceiling,
+    ("insurance",): calc_insurance_premium_to_expense_ratio,
+    ("cover", "sources"): calc_minimum_cover_ratio,
     ("revenue",): calc_revenue,
 }
 
@@ -61,19 +212,24 @@ def compute_actual(
     term: ContractTerm,
     transactions: list[TransactionRecord],
     related_party_names: list[str] | None = None,
-) -> float | None:
-    metric = term.metric_name.lower()
+) -> tuple[float | None, list[str]]:
+    search_text = (term.metric_name + " " + term.formula_description).lower()
+    base_currency = term.currency or "USD"
 
-    if "related" in metric or "связан" in metric:
+    for keyword_groups, reason in _KNOWN_UNSUPPORTED_KEYWORDS:
+        if any(all(kw in search_text for kw in group) for group in keyword_groups):
+            return None, [f"{term.company_id} {term.clause_id}: НЕ СЧИТАЕТСЯ — {reason}"]
+
+    if any(kw in search_text for kw in ("related", "связан", "affiliate", "аффилиров")):
         if related_party_names is None:
             raise ValueError(
                 f"{term.company_id} {term.clause_id}: метрика похожа на "
                 f"related-party, но related_party_names не переданы"
             )
-        return calc_related_party_payments(transactions, related_party_names)
+        return calc_related_party_payments(transactions, related_party_names, base_currency)
 
     for keywords, func in _DISPATCH.items():
-        if all(kw in metric for kw in keywords) or any(kw in metric for kw in keywords):
-            return func(transactions)
+        if all(kw in search_text for kw in keywords):
+            return func(transactions, base_currency)
 
-    return None  # Неизвестная метрика — нужен ручной разбор, НЕ угадываем
+    return None, []

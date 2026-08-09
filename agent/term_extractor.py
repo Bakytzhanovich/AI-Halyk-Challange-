@@ -6,13 +6,12 @@ term_extractor — читает Статью 6 «Финансовые ковен
 У каждого из 12 договоров своя метрика/операция/период — модель должна
 извлекать их из текста заново на каждый вызов, не по шаблону.
 
-Поддерживает ДВА способа доступа к модели (выбирается автоматически по
-тому, какая переменная окружения установлена):
+Поддерживает ТРИ способа доступа к модели (выбирается автоматически по
+тому, какая переменная окружения установлена, приоритет сверху вниз):
 
   export ANTHROPIC_API_KEY=sk-ant-...      # напрямую через Anthropic API
-  export OPENROUTER_API_KEY=sk-or-...      # через OpenRouter (OpenAI-совместимый формат)
-
-Если установлены обе — приоритет у ANTHROPIC_API_KEY (напрямую надёжнее/дешевле).
+  export OPENAI_API_KEY=sk-...             # напрямую через OpenAI API
+  export OPENROUTER_API_KEY=sk-or-...      # через OpenRouter
 """
 from __future__ import annotations
 
@@ -27,13 +26,17 @@ from schemas import ContractTerm
 
 MODEL = "claude-sonnet-4-6"                       # для прямого Anthropic API
 OPENROUTER_MODEL = "anthropic/claude-sonnet-4.6"   # тот же Sonnet, но через OpenRouter
+OPENAI_MODEL = "gpt-4.1-mini"                       # для прямого OpenAI API
+
 
 def make_llm_client():
     """
     Возвращает callable(system_prompt, user_content) -> str (сырой текстовый
     ответ модели), автоматически выбирая backend по переменным окружения.
+    Приоритет: ANTHROPIC_API_KEY -> OPENAI_API_KEY (напрямую) -> OPENROUTER_API_KEY.
     """
     anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
+    openai_key = os.environ.get("OPENAI_API_KEY")
     openrouter_key = os.environ.get("OPENROUTER_API_KEY")
 
     if anthropic_key:
@@ -44,11 +47,31 @@ def make_llm_client():
         def call(system_prompt: str, user_content: str) -> str:
             response = client.messages.create(
                 model=MODEL,
-                max_tokens=700,
+                max_tokens=2000,
+                temperature=0,
                 system=system_prompt,
                 messages=[{"role": "user", "content": user_content}],
             )
             return response.content[0].text
+
+        return call
+
+    if openai_key:
+        from openai import OpenAI
+
+        client = OpenAI(api_key=openai_key)  # без base_url — идёт напрямую в api.openai.com
+
+        def call(system_prompt: str, user_content: str) -> str:
+            response = client.chat.completions.create(
+                model=OPENAI_MODEL,
+                max_tokens=2000,
+                temperature=0,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_content},
+                ],
+            )
+            return response.choices[0].message.content
 
         return call
 
@@ -60,7 +83,8 @@ def make_llm_client():
         def call(system_prompt: str, user_content: str) -> str:
             response = client.chat.completions.create(
                 model=OPENROUTER_MODEL,
-                max_tokens=700,
+                max_tokens=2000,
+                temperature=0,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_content},
@@ -71,8 +95,8 @@ def make_llm_client():
         return call
 
     raise RuntimeError(
-        "Не найден ни ANTHROPIC_API_KEY, ни OPENROUTER_API_KEY в окружении. "
-        "Установи один из них: export ANTHROPIC_API_KEY=... или export OPENROUTER_API_KEY=..."
+        "Не найден ни ANTHROPIC_API_KEY, ни OPENAI_API_KEY, ни OPENROUTER_API_KEY "
+        "в окружении. Установи один из них."
     )
 
 
@@ -102,33 +126,40 @@ clause_id, metric_name, operator, threshold, currency, period_start, period_end,
 
 
 ARTICLE_6_START_RE = re.compile(r"Статья\s+6\b", re.IGNORECASE)
-ARTICLE_NEXT_RE = re.compile(r"Статья\s+7\b", re.IGNORECASE)
+ARTICLE_6_HEADING_RE = re.compile(r"Статья\s+6\s*[—-]", re.IGNORECASE)
+ARTICLE_NEXT_RE = re.compile(r"Статья\s+7\s*[—-]", re.IGNORECASE)
 
 
 def _extract_article_6_context(full_text: str) -> str:
-    matches = list(ARTICLE_6_START_RE.finditer(full_text))
-    for match in reversed(matches):
-        window = full_text[match.end():match.end() + 2000]
-        if re.search(r"6\.1\b", window):
-            start = match.start()
-            end_match = ARTICLE_NEXT_RE.search(full_text, start)
-            end = end_match.start() if end_match else len(full_text)
-            return full_text[start:end]
-    return full_text  # fallback — не нашли надёжного совпадения
+    """
+    Документы содержат оглавление в начале ("Статья 6\\nФинансовые ковенанты",
+    без тире) ПЕРЕД реальным заголовком раздела ("Статья 6 — Финансовые
+    ковенанты", с тире) — берём именно заголовок раздела, а не первое
+    совпадение "Статья 6", иначе попадаем в оглавление и остаёмся без текста.
+    """
+    start_match = ARTICLE_6_HEADING_RE.search(full_text)
+    if not start_match:
+        start_match = ARTICLE_6_START_RE.search(full_text)
+    if not start_match:
+        return full_text
+
+    start = start_match.start()
+    end_match = ARTICLE_NEXT_RE.search(full_text, start_match.end())
+    end = end_match.start() if end_match else len(full_text)
+    return full_text[start:end]
 
 
 def extract_terms_from_contract(
     pdf_path: Path,
     company_id: str,
     call_llm,
-) -> list[ContractTerm]:
+) -> tuple[list[ContractTerm], list[str]]:
     with fitz.open(pdf_path) as doc:
         full_text = "\n".join(page.get_text() for page in doc)
 
     context = _extract_article_6_context(full_text)
 
     raw = call_llm(SYSTEM_PROMPT, f"Текст договора:\n\n{context}").strip()
-    # Защита от случайных markdown-оберток, даже если промпт их запретил
     if raw.startswith("```"):
         raw = raw.strip("`")
         raw = raw.split("\n", 1)[1] if "\n" in raw else raw
@@ -137,28 +168,35 @@ def extract_terms_from_contract(
     parsed = json.loads(raw)
 
     terms = []
+    item_warnings = []
     for item in parsed:
-        terms.append(
-            ContractTerm(
-                company_id=company_id,
-                clause_id=item["clause_id"],
-                metric_name=item["metric_name"],
-                operator=item["operator"],
-                threshold=float(item["threshold"]),
-                currency=item.get("currency"),
-                period_start=item["period_start"],
-                period_end=item["period_end"],
-                formula_description=item["formula_description"],
-                source_doc=str(pdf_path),
-                source_span=item.get("source_span"),
+        try:
+            terms.append(
+                ContractTerm(
+                    company_id=company_id,
+                    clause_id=item["clause_id"],
+                    metric_name=item["metric_name"],
+                    operator=item["operator"],
+                    threshold=float(item["threshold"]),
+                    currency=item.get("currency"),
+                    period_start=item["period_start"],
+                    period_end=item["period_end"],
+                    formula_description=item["formula_description"],
+                    source_doc=str(pdf_path),
+                    source_span=item.get("source_span"),
+                )
             )
-        )
-    return terms
+        except Exception as e:
+            item_warnings.append(
+                f"{company_id}: не удалось разобрать пункт "
+                f"{item.get('clause_id', '?')} — {e}"
+            )
+    return terms, item_warnings
 
 
 def extract_all(
-    selected_contracts: dict[str, Path],  # account_id -> путь к договору
-    account_to_scenario: dict[str, str],   # account_id -> scenario_id
+    selected_contracts: dict[str, Path],
+    account_to_scenario: dict[str, str],
 ) -> tuple[list[ContractTerm], list[str]]:
     call_llm = make_llm_client()
     all_terms: list[ContractTerm] = []
@@ -170,7 +208,8 @@ def extract_all(
             warnings.append(f"{account_id}: нет scenario_id в маппинге, пропущен")
             continue
         try:
-            terms = extract_terms_from_contract(pdf_path, company_id, call_llm)
+            terms, item_warnings = extract_terms_from_contract(pdf_path, company_id, call_llm)
+            warnings.extend(item_warnings)
             if len(terms) != 3:
                 warnings.append(
                     f"{company_id} ({account_id}): извлечено {len(terms)} условий "

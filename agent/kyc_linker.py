@@ -1,26 +1,45 @@
 """
-kyc_linker — извлекает связанные стороны из KYC-досье (порог >= 20.0%
-голосующих прав, как явно указано в разделе "Бенефициарное владение и
-контроль") и сопоставляет их с полем counterparty в леджере.
+kyc_linker — извлекает связанные стороны из KYC-досье (порог голосующих
+прав ЧИТАЕТСЯ ИЗ ТЕКСТА каждого досье — он разный у разных компаний,
+от 20.0% до 38.0%, а не фиксирован) и сопоставляет их с полем
+counterparty в леджере.
 
 КРИТИЧНО (найдено на P1): форматирование имени компании РАЗНОЕ в разных
 документах — "Aktau Holdings LLP" в KYC, но "Aktau Holdings L.L.P."
 в леджере. Точное сравнение строк здесь ломается. Нужна нормализация:
-убрать точки, лишние пробелы, привести к одному регистру, отбросить
-локационные суффиксы в скобках вида "(Turkistan point)".
+убрать точки и запятые, лишние пробелы, привести к одному регистру,
+отбросить локационные суффиксы в скобках вида "(Turkistan point)".
+
+КРИТИЧНО (найдено при разборе всех 12 KYC-досье): реальные PDF содержат
+варианты форматирования, которые ломали более простую версию regex —
+"Ertis Capital, LLP" (запятая перед суффиксом) и "Kazyna Capital LLP.\\n38.9%"
+(точка сразу после суффикса перед переводом строки, из-за табличной
+разбивки текста PyMuPDF). Оба случая теперь учтены в ENTITY_PERCENT_RE.
 """
 from __future__ import annotations
 
 import re
 
-RELATED_PARTY_THRESHOLD = 20.0  # % голосующих прав — порог из формулировки договора
+RELATED_PARTY_THRESHOLD = 20.0  # fallback, если порог не найден в тексте досье
+
+# Кавычки, встречающиеся вокруг названий компаний в KYC-досье (прямые и
+# кавычки-ёлочки/типографские) — например '"Saryarka Capital Partners" LLP'.
+_QUOTE_CHARS = "\"'«»“”"
 
 # Захватывает "Название компании ... XX.X%" — название заканчивается на
-# распространённый корпоративный суффикс (LLP, JSC, Ltd, LLC, Inc, L.L.P.)
+# распространённый корпоративный суффикс (LLP, JSC, Ltd, LLC, Inc, L.L.P.).
+# Запятая и кавычки разрешены внутри названия ("Capital, LLP", '"Turan Capital" LLP'),
+# точка разрешена в разделителе перед процентом (суффикс сразу за точкой,
+# как "LLP.\n38.9%").
 ENTITY_PERCENT_RE = re.compile(
-    r"([A-ZА-ЯЁ][\w \.\-&]*?(?:LLP|L\.L\.P\.|JSC|Ltd|LLC|Inc|Trust|Group|Corp))"
-    r"[ \t\-:]*(\d{1,3}(?:\.\d+)?)\s*%",
+    r"([A-ZА-ЯЁ][\w \.\-&," + _QUOTE_CHARS + r"]*?(?:LLP|L\.L\.P\.|JSC|Ltd|LLC|Inc|Trust|Group|Corp))"
+    r"[ \t\-:\n.]*(\d{1,3}(?:\.\d+)?)\s*%",
 )
+
+# Порог голосующих прав, при котором организация признаётся связанной
+# стороной — свой у каждой компании ("... владеет XX.X% и более
+# голосующих прав, признаются связанными сторонами для целей Договора").
+THRESHOLD_RE = re.compile(r"владеет\s+(\d{1,3}(?:\.\d+)?)\s*%\s+и\s+более")
 
 # Локационные суффиксы вида "(Turkistan point)", "(Kyzylorda station)" —
 # встречаются в леджере, но не в KYC-досье, мешают точному сравнению.
@@ -29,22 +48,34 @@ LOCATION_SUFFIX_RE = re.compile(r"\s*\([^)]*\)\s*$")
 
 def normalize_name(name: str) -> str:
     name = LOCATION_SUFFIX_RE.sub("", name)
-    name = name.replace(".", "")
+    name = name.replace(".", "").replace(",", "")
+    for quote_char in ('"', "'", "«", "»", "“", "”"):
+        name = name.replace(quote_char, "")
     name = re.sub(r"\s+", " ", name)
     return name.strip().lower()
+
+
+def _extract_threshold(kyc_text: str) -> float:
+    match = THRESHOLD_RE.search(kyc_text)
+    return float(match.group(1)) if match else RELATED_PARTY_THRESHOLD
 
 
 def extract_related_parties(kyc_text: str) -> list[tuple[str, float]]:
     """
     Возвращает список (название_компании, доля_%) только для долей
-    >= RELATED_PARTY_THRESHOLD — остальные упомянутые в KYC организации
-    НЕ являются связанными сторонами для целей ковенанта 6.3.
+    >= порога, извлечённого из ЭТОГО ЖЕ текста досье — остальные
+    упомянутые в KYC организации НЕ являются связанными сторонами
+    для целей ковенанта 6.3.
     """
+    threshold = _extract_threshold(kyc_text)
     related = []
     for match in ENTITY_PERCENT_RE.finditer(kyc_text):
         name, pct_str = match.group(1).strip(), match.group(2)
+        for quote_char in ('"', "'", "«", "»", "“", "”"):
+            name = name.replace(quote_char, "")
+        name = name.strip()
         pct = float(pct_str)
-        if pct >= RELATED_PARTY_THRESHOLD:
+        if pct >= threshold:
             related.append((name, pct))
     return related
 

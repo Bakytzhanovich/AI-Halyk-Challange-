@@ -2,7 +2,8 @@
 pipeline — склеивает все модули в один прогон:
 documents/ + master_ledger_2025.csv  ->  submission.json
 
-Требует ANTHROPIC_API_KEY для term_extractor. Остальные шаги — чистый Python.
+Требует ANTHROPIC_API_KEY / OPENAI_API_KEY / OPENROUTER_API_KEY для term_extractor.
+Остальные шаги — чистый Python.
 
 Запуск:
     python3 agent/pipeline.py <documents_dir> <ledger_path> <team> <email> <output_path>
@@ -77,7 +78,9 @@ def run_pipeline(
             all_warnings.append(f"{company_id}: нет извлечённых условий, пропущен")
             continue
 
-        transactions = load_transactions(ledger_path, account_id)
+        transactions, load_warnings = load_transactions(ledger_path, account_id)
+        if load_warnings:
+            all_warnings.extend(f"{company_id}: {w}" for w in load_warnings)
 
         kyc_text = _company_docs_text(all_docs, account_id, "kyc")
         related_names = [name for name, _ in extract_related_parties(kyc_text)]
@@ -97,7 +100,13 @@ def run_pipeline(
                     f"{company_id} {term.clause_id}: период отличается от "
                     f"остальных пунктов компании — ПРОВЕРЬ ВРУЧНУЮ"
                 )
-            actual = compute_actual(term, transactions, related_party_names=related_names)
+            actual, currency_warnings = compute_actual(
+                term, transactions, related_party_names=related_names
+            )
+            if currency_warnings:
+                all_warnings.extend(
+                    f"{company_id} {term.clause_id}: {w}" for w in currency_warnings
+                )
             if actual is None:
                 all_warnings.append(
                     f"{company_id} {term.clause_id}: метрика '{term.metric_name}' "
@@ -114,8 +123,9 @@ def run_pipeline(
 
     print(f"\n✅ Готово: {len(results)} условий записано в {output_path}")
     if all_warnings:
-        print(f"\n⚠️  Предупреждения ({len(all_warnings)}) — ПРОВЕРЬ ПЕРЕД СДАЧЕЙ:")
-        for w in all_warnings:
+        unique_warnings = list(dict.fromkeys(all_warnings))
+        print(f"\n⚠️  Предупреждения ({len(unique_warnings)}) — ПРОВЕРЬ ПЕРЕД СДАЧЕЙ:")
+        for w in unique_warnings:
             print(f"  - {w}")
 
 
