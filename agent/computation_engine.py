@@ -219,6 +219,56 @@ def calc_maximum_fiscal_burden_ratio(
     return fiscal_burden / revenue, warnings
 
 
+def calc_total_premises_maintenance_expenses(
+    transactions: list[TransactionRecord], base_currency: str = "USD"
+) -> tuple[float, list[str]]:
+    active = _active(transactions)
+    active, warnings = _split_by_currency(active, base_currency)
+    total = (
+        _sum_category(active, "rent")
+        + _sum_category(active, "utilities")
+        + _sum_category(active, "insurance")
+    )
+    return total, warnings
+
+
+def calc_fixed_cost_coverage_reserve(
+    transactions: list[TransactionRecord], base_currency: str = "USD"
+) -> tuple[float, list[str]]:
+    active = _active(transactions)
+    active, warnings = _split_by_currency(active, base_currency)
+    revenue = sum(t.amount for t in active if t.category == "revenue")
+    fixed_costs = abs(_net_operating_expenses(active)) + _sum_category(active, "rent")
+    return revenue - fixed_costs, warnings
+
+
+def calc_minimum_fixed_charge_coverage_ratio(
+    transactions: list[TransactionRecord], base_currency: str = "USD"
+) -> tuple[float, list[str]]:
+    active = _active(transactions)
+    active, warnings = _split_by_currency(active, base_currency)
+    ebitda, _ = _calc_ebitda(active)
+    rent = _sum_category(active, "rent")
+    ebitdar = ebitda + rent
+    fixed_charges = _sum_category(active, "interest") + rent
+    if fixed_charges == 0:
+        raise ValueError("Fixed charges = 0, деление на ноль")
+    return ebitdar / fixed_charges, warnings
+
+
+def calc_minimum_retained_financing_proceeds(
+    transactions: list[TransactionRecord], base_currency: str = "USD"
+) -> tuple[float, list[str]]:
+    active = _active(transactions)
+    active, warnings = _split_by_currency(active, base_currency)
+    proceeds = (
+        _sum_category(active, "financing")
+        - _sum_category(active, "interest")
+        - _sum_category(active, "tax")
+    )
+    return proceeds, warnings
+
+
 def calc_minimum_cover_ratio(
     transactions: list[TransactionRecord], base_currency: str = "USD"
 ) -> tuple[float, list[str]]:
@@ -292,6 +342,10 @@ _DISPATCH = {
     ("ebitda", "interest"): calc_interest_coverage_ratio,
     ("operating", "expense"): calc_operating_expenses,
     ("fiscal", "burden"): calc_maximum_fiscal_burden_ratio,
+    ("premises", "maintenance"): calc_total_premises_maintenance_expenses,
+    ("fixed", "cost", "coverage", "reserve"): calc_fixed_cost_coverage_reserve,
+    ("fixed", "charge", "coverage"): calc_minimum_fixed_charge_coverage_ratio,
+    ("retained", "financing"): calc_minimum_retained_financing_proceeds,
 }
 
 
