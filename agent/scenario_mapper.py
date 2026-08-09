@@ -23,18 +23,42 @@ from pathlib import Path
 SCENARIO_PREFIX_RE = re.compile(r"^TXN-(P\d{1,2}|B\d{1,2})-")
 
 
-def build_mapping(ledger_path: Path) -> tuple[dict[str, str], list[str]]:
+def _build_scenario_regex(expected_scenario_ids: set[str]) -> re.Pattern[str]:
+    """Строит regex из реальных ожидаемых scenario_id вместо жёсткого P/B паттерна.
+
+    Сортировка по убыванию длины — чтобы более длинный id (напр. "H10")
+    не терялся за более коротким префиксом-совпадением (напр. "H1") при
+    альтернации regex.
+    """
+    escaped = sorted((re.escape(s) for s in expected_scenario_ids), key=len, reverse=True)
+    return re.compile(r"^TXN-(" + "|".join(escaped) + r")-")
+
+
+def build_mapping(
+    ledger_path: Path,
+    expected_scenario_ids: set[str] | None = None,
+) -> tuple[dict[str, str], list[str]]:
     """
     Возвращает:
     - dict[account_id, scenario_id] — итоговый маппинг
     - list[str] — предупреждения (scenario с >1 account_id, account_id с >1 scenario)
+
+    expected_scenario_ids: если передан — regex строится динамически из
+    реальных ожидаемых id (напр. из submission_template.json), вместо
+    захардкоженного SCENARIO_PREFIX_RE (P1-P10/B1/B4).
     """
+    prefix_re = (
+        _build_scenario_regex(expected_scenario_ids)
+        if expected_scenario_ids
+        else SCENARIO_PREFIX_RE
+    )
+
     votes: dict[str, Counter] = defaultdict(Counter)  # scenario_id -> Counter[account_id]
 
     with open(ledger_path, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            match = SCENARIO_PREFIX_RE.match(row["txn_id"])
+            match = prefix_re.match(row["txn_id"])
             if not match:
                 continue  # шумовая транзакция, не из 12 заёмщиков
             scenario_id = match.group(1)

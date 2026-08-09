@@ -44,8 +44,14 @@ def run_pipeline(
     team: str,
     contact_email: str,
     output_path: Path,
+    submission_template_path: Path | None = None,
 ) -> None:
     all_warnings: list[str] = []
+
+    expected_scenario_ids: set[str] | None = None
+    if submission_template_path is not None:
+        template = json.loads(submission_template_path.read_text(encoding="utf-8"))
+        expected_scenario_ids = set(template["answers"].keys())
 
     print("1/6 document_classifier...")
     all_docs = classify_all(documents_dir)
@@ -55,7 +61,7 @@ def run_pipeline(
     all_warnings += sel_warnings
 
     print("3/6 scenario_mapper...")
-    account_to_scenario, map_warnings = build_mapping(ledger_path)
+    account_to_scenario, map_warnings = build_mapping(ledger_path, expected_scenario_ids)
     all_warnings += map_warnings
 
     print("4/6 term_extractor (использует Claude API)...")
@@ -134,10 +140,11 @@ def run_pipeline(
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 6:
+    if len(sys.argv) not in (6, 7):
         print(
             "Использование: python3 pipeline.py "
-            "<documents_dir> <ledger_path> <team> <email> <output_path>"
+            "<documents_dir> <ledger_path> <team> <email> <output_path> "
+            "[submission_template_path]"
         )
         sys.exit(1)
 
@@ -147,4 +154,5 @@ if __name__ == "__main__":
         team=sys.argv[3],
         contact_email=sys.argv[4],
         output_path=Path(sys.argv[5]),
+        submission_template_path=Path(sys.argv[6]) if len(sys.argv) == 7 else None,
     )
