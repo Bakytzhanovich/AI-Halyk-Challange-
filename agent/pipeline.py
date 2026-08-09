@@ -117,7 +117,11 @@ def run_pipeline(
 
     print("6/6 сборка submission.json...")
     submission = Submission.from_results(
-        team=team, contact_email=contact_email, model=MODEL, results=results
+        team=team,
+        contact_email=contact_email,
+        model=MODEL,
+        results=results,
+        company_ids=list(account_to_scenario.values()),
     )
     output_path.write_text(submission.model_dump_json(indent=2), encoding="utf-8")
 
