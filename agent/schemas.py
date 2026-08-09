@@ -60,6 +60,7 @@ class TransactionRecord(BaseModel):
         Literal[
             "capex", "opex", "rent", "revenue",
             "interest", "tax", "payroll", "utilities", "insurance",
+            "financing",
             "related_party", "other",
         ]
     ] = None

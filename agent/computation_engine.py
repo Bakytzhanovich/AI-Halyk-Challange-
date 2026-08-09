@@ -13,6 +13,8 @@ insurance-ковенант во всех 36 условиях) — использ
 """
 from __future__ import annotations
 
+import re
+
 from schemas import ContractTerm, TransactionRecord
 from kyc_linker import is_related_party
 
@@ -147,6 +149,51 @@ def calc_capital_expenditure(
     return _sum_category(active, "capex"), warnings
 
 
+_MARKETING_DESCRIPTION_RE = re.compile(
+    r"marketing|advertising|campaign|exhibition|media buy", re.I
+)
+
+
+def calc_marketing_expenses(
+    transactions: list[TransactionRecord], base_currency: str = "USD"
+) -> tuple[float, list[str]]:
+    """
+    Сознательно НЕ использует общую категорию транзакций (в отличие от
+    calc_capital_expenditure/_sum_category) — сканирует description
+    напрямую. Причина: и публичный, и приватный датасет содержат
+    "шумовые" транзакции с "ad campaign"/"exhibition ... marketing" у
+    компаний БЕЗ ковенанта на маркетинг, лингвистически неотличимые от
+    целевых. Если завести общую категорию "marketing" в
+    transaction_analyzer, эти шумовые транзакции утекают в opex-базу
+    ДРУГИХ компаний и меняют их EBITDA-зависимые метрики (сломало
+    регрессию P1/6.1: 0.0448 -> 0.05). Эта функция вызывается только для
+    компании, чья ИЗВЛЕЧЁННАЯ формула — про маркетинг (см. _DISPATCH),
+    поэтому прямой скан description здесь безопасен и не задевает
+    расчёты остальных компаний.
+    """
+    active = _active(transactions)
+    active, warnings = _split_by_currency(active, base_currency)
+    matched = [t for t in active if _MARKETING_DESCRIPTION_RE.search(t.description)]
+    warnings = warnings + [
+        "marketing_expenses: считается по факту транзакций, текст которых "
+        "матчит маркетинговые ключевые слова, БЕЗ учёта переклассификаций "
+        "аудитором в/из этой статьи"
+    ]
+    return abs(sum(t.amount for t in matched)), warnings
+
+
+def calc_debt_to_ebitda_ratio(
+    transactions: list[TransactionRecord], base_currency: str = "USD"
+) -> tuple[float, list[str]]:
+    active = _active(transactions)
+    active, warnings = _split_by_currency(active, base_currency)
+    debt = _sum_category(active, "financing")
+    ebitda, _ = _calc_ebitda(active)
+    if ebitda == 0:
+        raise ValueError("EBITDA = 0, деление на ноль")
+    return debt / ebitda, warnings
+
+
 def calc_minimum_cover_ratio(
     transactions: list[TransactionRecord], base_currency: str = "USD"
 ) -> tuple[float, list[str]]:
@@ -193,6 +240,16 @@ _KNOWN_UNSUPPORTED_KEYWORDS: list[tuple[list[tuple[str, ...]], str]] = [
         "формула требует список 'Неограниченных дочерних организаций' из "
         "KYC-досье и транзакции передачи активов дочерним структурам",
     ),
+    (
+        # F2 6.1 требует МАКСИМУМ по кварталам, а не сумму за весь период —
+        # calc_marketing_expenses считает простую сумму, дал бы неверный
+        # результат. Проверяется ДО диспетчера, чтобы не попасть в общий
+        # ("marketing", "expense") дальше по функции.
+        [("quarterly", "marketing"), ("маркетинг", "квартал")],
+        "формула требует наибольшую КВАРТАЛЬНУЮ величину маркетинговых "
+        "расходов, а не сумму за весь период — расчёт по кварталам не "
+        "реализован (простая сумма дала бы неверный результат)",
+    ),
 ]
 
 
@@ -205,6 +262,8 @@ _DISPATCH = {
     ("insurance",): calc_insurance_premium_to_expense_ratio,
     ("cover", "sources"): calc_minimum_cover_ratio,
     ("revenue",): calc_revenue,
+    ("marketing", "expense"): calc_marketing_expenses,
+    ("debt", "ebitda"): calc_debt_to_ebitda_ratio,
 }
 
 

@@ -34,6 +34,12 @@ CLASSIFICATION_RULES: list[tuple[re.Pattern, Category]] = [
     # --- Tax — налоги (below-the-line по МСФО) ---
     (re.compile(r"\btax\b|excise|franchise tax|penalty settlement", re.I), "tax"),
 
+    # --- Financing — привлечение долгового финансирования (term loan
+    #     drawdown). Ключевое слово "drawdown" встречается ровно один раз
+    #     на компанию в леджере, без коллизий с "interest on ... facility"
+    #     (те матчатся раньше по правилу interest, т.к. явно содержат "interest"). ---
+    (re.compile(r"drawdown", re.I), "financing"),
+
     # --- CapEx — приобретение основных средств / оборудования ---
     (re.compile(r"purchase of .*(equipment|crane|machinery|vehicle)", re.I), "capex"),
 
@@ -53,6 +59,18 @@ CLASSIFICATION_RULES: list[tuple[re.Pattern, Category]] = [
     (re.compile(r"insurance", re.I), "insurance"),
 
     # --- Opex — прочие операционные расходы ---
+    # ПРИМЕЧАНИЕ: "marketing" НЕ выделена в отдельную категорию здесь,
+    # в отличие от payroll/utilities/insurance. Причина: и публичный,
+    # и приватный датасет содержат "шумовые" транзакции с "ad campaign" /
+    # "exhibition ... marketing" у компаний БЕЗ ковенанта на маркетинг
+    # (P1/B1/P2/P4 в публичном датасете) — лингвистически неотличимые
+    # от целевых транзакций X1/X3/H5/S2/B3. Любой keyword, достаточно
+    # широкий, чтобы поймать реальные marketing_expenses-транзакции,
+    # ловит и этот шум, что меняет opex/EBITDA-базу для НЕ-marketing
+    # компаний и ломает регрессию (P1/6.1 переставал быть 0.0448).
+    # Поэтому calc_marketing_expenses в computation_engine.py сканирует
+    # description НАПРЯМУЮ, в обход общей категоризации — см. комментарий
+    # там же.
     (
         re.compile(
             r"marketing|maintenance|telecom|servicing|inspection|compensation",
