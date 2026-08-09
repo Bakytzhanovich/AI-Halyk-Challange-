@@ -194,6 +194,31 @@ def calc_debt_to_ebitda_ratio(
     return debt / ebitda, warnings
 
 
+def calc_operating_expenses(
+    transactions: list[TransactionRecord], base_currency: str = "USD"
+) -> tuple[float, list[str]]:
+    active = _active(transactions)
+    active, warnings = _split_by_currency(active, base_currency)
+    warnings = warnings + [
+        "operating_expenses: считается как сумма opex/payroll/utilities/"
+        "insurance по факту транзакций, БЕЗ учёта переклассификаций "
+        "аудитором в/из этих статей"
+    ]
+    return abs(_net_operating_expenses(active)), warnings
+
+
+def calc_maximum_fiscal_burden_ratio(
+    transactions: list[TransactionRecord], base_currency: str = "USD"
+) -> tuple[float, list[str]]:
+    active = _active(transactions)
+    active, warnings = _split_by_currency(active, base_currency)
+    fiscal_burden = _sum_category(active, "tax") + _sum_category(active, "interest")
+    revenue = sum(t.amount for t in active if t.category == "revenue")
+    if revenue == 0:
+        raise ValueError("Revenue = 0, деление на ноль")
+    return fiscal_burden / revenue, warnings
+
+
 def calc_minimum_cover_ratio(
     transactions: list[TransactionRecord], base_currency: str = "USD"
 ) -> tuple[float, list[str]]:
@@ -264,6 +289,9 @@ _DISPATCH = {
     ("revenue",): calc_revenue,
     ("marketing", "expense"): calc_marketing_expenses,
     ("debt", "ebitda"): calc_debt_to_ebitda_ratio,
+    ("ebitda", "interest"): calc_interest_coverage_ratio,
+    ("operating", "expense"): calc_operating_expenses,
+    ("fiscal", "burden"): calc_maximum_fiscal_burden_ratio,
 }
 
 
