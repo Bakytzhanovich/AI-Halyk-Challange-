@@ -10,7 +10,8 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
-ClauseId = Literal["6.1", "6.2", "6.3"]
+ClauseId = str  # было Literal["6.1","6.2","6.3"] — датасет содержит
+                # и другие пункты (5.1-5.3 у J4, 6.4 у X1/X2/X3)
 Operator = Literal["<=", "<", ">=", ">", "=="]
 DocType = Literal["contract", "audit", "kyc", "other"]
 
@@ -95,14 +96,20 @@ class Submission(BaseModel):
         model: str,
         results: list[CovenantResult],
         company_ids: Optional[list[str]] = None,
+        company_clause_ids: Optional[dict[str, list[str]]] = None,
     ) -> "Submission":
         """
         company_ids — полный список company_id, ожидаемых в submission
         (напр. все значения account_to_scenario), не только те, для которых
         есть результат. Нужен, чтобы структура JSON СТРОГО соответствовала
-        submission_template.json: каждая компания и все три пункта (6.1/6.2/6.3)
-        присутствуют как ключи всегда, с null-заглушками там, где значение
-        не посчитано — а не отсутствуют вовсе.
+        submission_template.json: каждая компания присутствует как ключ
+        всегда, с null-заглушками там, где значение не посчитано.
+
+        company_clause_ids — company_id -> список ожидаемых clause_id
+        (обычно из submission_template.json). Датасет больше не гарантирует
+        ровно 6.1/6.2/6.3 на компанию (J4: 5.1-5.3, X1-X3: 6.1-6.4) —
+        без явного маппинга для конкретной компании используется старый
+        список ("6.1","6.2","6.3") как fallback для обратной совместимости.
         """
         answers: dict[str, dict[str, dict]] = {}
         for r in results:
@@ -115,7 +122,10 @@ class Submission(BaseModel):
         all_company_ids = set(company_ids or []) | set(answers.keys())
         for company_id in all_company_ids:
             clauses = answers.setdefault(company_id, {})
-            for clause_id in ("6.1", "6.2", "6.3"):
+            expected_clauses = (company_clause_ids or {}).get(
+                company_id, ("6.1", "6.2", "6.3")
+            )
+            for clause_id in expected_clauses:
                 clauses.setdefault(
                     clause_id,
                     {"status": None, "actual": None, "evidence_txn_id": None},

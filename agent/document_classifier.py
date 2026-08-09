@@ -34,10 +34,13 @@ from schemas import ClassifiedDocument
 
 DRAFT_MARKERS = [
     "недействующая редакция",
-    "не применяется",
     "черновик",
     "draft",
 ]
+# "не применяется" сюда сознательно НЕ включена: это частая формулировка
+# внутри самих ковенантных пунктов (carve-out вида "ограничение X не
+# применяется"), а не признак устаревшей редакции документа — ловила
+# ложные срабатывания на действующих договорах (см. X1/X2/X3/B2/H2/J6).
 
 KYC_MARKERS = [
     "знай своего клиента",
@@ -58,10 +61,19 @@ CONTRACT_MARKERS = [
     "финансовые ковенанты",
     "заёмщик",
     "кредитор",
+    # Часть договоров в датасете полностью на английском (см. J4) —
+    # русские маркеры на них не срабатывают вообще.
+    "credit agreement",
+    "borrower",
+    "lender",
+    "financial covenants",
 ]
 
 # Паттерны для structured extraction
-ACCOUNT_ID_RE = re.compile(r"ACC-(\d{4})(?:-\d+)?")
+# Буквенный префикс 2-6 символов + дефис + 3-5 цифр — обобщено с
+# захардкоженного "ACC-XXXX", т.к. в датасете встречаются и другие
+# префиксы счетов (напр. TELE-4471 у Taraz Mobile Networks JSC).
+ACCOUNT_ID_RE = re.compile(r"([A-Z]{2,6}-\d{3,5})(?:-\d+)?")
 COVENANT_PERIOD_RE = re.compile(
     r"период[а-я\s]*с\s+(\d{4}-\d{2}-\d{2})\s+по\s+(\d{4}-\d{2}-\d{2})",
     re.IGNORECASE,
@@ -98,7 +110,7 @@ def _classify_doc_type(text_lower: str) -> str:
 
 def _extract_account_id(text: str) -> str | None:
     """
-    Берём самый частотный ACC-XXXX (без суффикса) в документе —
+    Берём самый частотный account_id (без суффикса) в документе —
     это устойчивее, чем "первое совпадение", т.к. дистракторные
     суффиксные ID (ACC-7801-05) обычно встречаются один раз,
     а основной ID компании — многократно по всему договору/досье.
@@ -108,8 +120,7 @@ def _extract_account_id(text: str) -> str | None:
         return None
     from collections import Counter
 
-    most_common = Counter(matches).most_common(1)[0][0]
-    return f"ACC-{most_common}"
+    return Counter(matches).most_common(1)[0][0]
 
 
 def _extract_covenant_period(text: str) -> tuple[date | None, date | None]:

@@ -49,9 +49,14 @@ def run_pipeline(
     all_warnings: list[str] = []
 
     expected_scenario_ids: set[str] | None = None
+    company_clause_ids: dict[str, list[str]] | None = None
     if submission_template_path is not None:
         template = json.loads(submission_template_path.read_text(encoding="utf-8"))
         expected_scenario_ids = set(template["answers"].keys())
+        company_clause_ids = {
+            company_id: list(clauses.keys())
+            for company_id, clauses in template["answers"].items()
+        }
 
     print("1/6 document_classifier...")
     all_docs = classify_all(documents_dir)
@@ -128,6 +133,7 @@ def run_pipeline(
         model=MODEL,
         results=results,
         company_ids=list(account_to_scenario.values()),
+        company_clause_ids=company_clause_ids,
     )
     output_path.write_text(submission.model_dump_json(indent=2), encoding="utf-8")
 

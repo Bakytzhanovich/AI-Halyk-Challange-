@@ -3,6 +3,50 @@
   "contact_email": "nursatbakytzhanuli@gmail.com",
   "model": "claude-sonnet-4-6",
   "answers": {
+    "X1": {
+      "6.2": {
+        "status": "COMPLIANT",
+        "actual": 17946922.83,
+        "evidence_txn_id": null
+      },
+      "6.3": {
+        "status": "BREACH",
+        "actual": 2225478.87,
+        "evidence_txn_id": null
+      },
+      "6.4": {
+        "status": "BREACH",
+        "actual": 4820049.83,
+        "evidence_txn_id": null
+      },
+      "6.1": {
+        "status": null,
+        "actual": null,
+        "evidence_txn_id": null
+      }
+    },
+    "X2": {
+      "6.3": {
+        "status": "BREACH",
+        "actual": 2915612.3,
+        "evidence_txn_id": null
+      },
+      "6.1": {
+        "status": null,
+        "actual": null,
+        "evidence_txn_id": null
+      },
+      "6.2": {
+        "status": null,
+        "actual": null,
+        "evidence_txn_id": null
+      },
+      "6.4": {
+        "status": null,
+        "actual": null,
+        "evidence_txn_id": null
+      }
+    },
     "F3": {
       "6.2": {
         "status": "BREACH",
@@ -37,6 +81,23 @@
         "evidence_txn_id": null
       }
     },
+    "H2": {
+      "6.1": {
+        "status": "BREACH",
+        "actual": 487220.16,
+        "evidence_txn_id": null
+      },
+      "6.2": {
+        "status": "COMPLIANT",
+        "actual": 10509458.59,
+        "evidence_txn_id": null
+      },
+      "6.3": {
+        "status": "COMPLIANT",
+        "actual": 1642880.53,
+        "evidence_txn_id": null
+      }
+    },
     "S1": {
       "6.1": {
         "status": "COMPLIANT",
@@ -66,6 +127,23 @@
         "evidence_txn_id": null
       },
       "6.1": {
+        "status": null,
+        "actual": null,
+        "evidence_txn_id": null
+      }
+    },
+    "J6": {
+      "6.2": {
+        "status": "COMPLIANT",
+        "actual": 9519405.87,
+        "evidence_txn_id": null
+      },
+      "6.1": {
+        "status": null,
+        "actual": null,
+        "evidence_txn_id": null
+      },
+      "6.3": {
         "status": null,
         "actual": null,
         "evidence_txn_id": null
@@ -124,7 +202,7 @@
     },
     "H3": {
       "6.2": {
-        "status": "COMPLIANT",
+        "status": "BREACH",
         "actual": 0.0,
         "evidence_txn_id": null
       },
@@ -207,6 +285,23 @@
         "evidence_txn_id": null
       }
     },
+    "KC": {
+      "6.2": {
+        "status": "COMPLIANT",
+        "actual": 0.0,
+        "evidence_txn_id": null
+      },
+      "6.3": {
+        "status": "COMPLIANT",
+        "actual": 0.0,
+        "evidence_txn_id": null
+      },
+      "6.1": {
+        "status": null,
+        "actual": null,
+        "evidence_txn_id": null
+      }
+    },
     "J1": {
       "6.2": {
         "status": "COMPLIANT",
@@ -275,6 +370,23 @@
         "evidence_txn_id": null
       }
     },
+    "J4": {
+      "5.3": {
+        "status": "BREACH",
+        "actual": 9151633.59,
+        "evidence_txn_id": null
+      },
+      "5.1": {
+        "status": null,
+        "actual": null,
+        "evidence_txn_id": null
+      },
+      "5.2": {
+        "status": null,
+        "actual": null,
+        "evidence_txn_id": null
+      }
+    },
     "F2": {
       "6.2": {
         "status": "BREACH",
@@ -309,75 +421,24 @@
         "evidence_txn_id": null
       }
     },
-    "X1": {
-      "6.1": {
-        "status": null,
-        "actual": null,
-        "evidence_txn_id": null
-      },
-      "6.2": {
-        "status": null,
-        "actual": null,
-        "evidence_txn_id": null
-      },
-      "6.3": {
-        "status": null,
-        "actual": null,
-        "evidence_txn_id": null
-      }
-    },
     "B2": {
-      "6.1": {
-        "status": null,
-        "actual": null,
-        "evidence_txn_id": null
-      },
       "6.2": {
-        "status": null,
-        "actual": null,
+        "status": "COMPLIANT",
+        "actual": 9712774.92,
         "evidence_txn_id": null
       },
       "6.3": {
+        "status": "BREACH",
+        "actual": 304609.8,
+        "evidence_txn_id": null
+      },
+      "6.1": {
         "status": null,
         "actual": null,
         "evidence_txn_id": null
       }
     },
-    "X2": {
-      "6.1": {
-        "status": null,
-        "actual": null,
-        "evidence_txn_id": null
-      },
-      "6.2": {
-        "status": null,
-        "actual": null,
-        "evidence_txn_id": null
-      },
-      "6.3": {
-        "status": null,
-        "actual": null,
-        "evidence_txn_id": null
-      }
-    },
-    "J6": {
-      "6.1": {
-        "status": null,
-        "actual": null,
-        "evidence_txn_id": null
-      },
-      "6.2": {
-        "status": null,
-        "actual": null,
-        "evidence_txn_id": null
-      },
-      "6.3": {
-        "status": null,
-        "actual": null,
-        "evidence_txn_id": null
-      }
-    },
-    "J4": {
+    "J3": {
       "6.1": {
         "status": null,
         "actual": null,
@@ -409,54 +470,8 @@
         "status": null,
         "actual": null,
         "evidence_txn_id": null
-      }
-    },
-    "J3": {
-      "6.1": {
-        "status": null,
-        "actual": null,
-        "evidence_txn_id": null
       },
-      "6.2": {
-        "status": null,
-        "actual": null,
-        "evidence_txn_id": null
-      },
-      "6.3": {
-        "status": null,
-        "actual": null,
-        "evidence_txn_id": null
-      }
-    },
-    "H2": {
-      "6.1": {
-        "status": null,
-        "actual": null,
-        "evidence_txn_id": null
-      },
-      "6.2": {
-        "status": null,
-        "actual": null,
-        "evidence_txn_id": null
-      },
-      "6.3": {
-        "status": null,
-        "actual": null,
-        "evidence_txn_id": null
-      }
-    },
-    "KC": {
-      "6.1": {
-        "status": null,
-        "actual": null,
-        "evidence_txn_id": null
-      },
-      "6.2": {
-        "status": null,
-        "actual": null,
-        "evidence_txn_id": null
-      },
-      "6.3": {
+      "6.4": {
         "status": null,
         "actual": null,
         "evidence_txn_id": null
